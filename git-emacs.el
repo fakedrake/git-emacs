@@ -360,6 +360,28 @@ autoloading which we know has already happened."
        (progn (eval-when-compile (require 'git-status)) ,THEN)
      ,@ELSE))
 
+(defmacro git--if-in-dired-mode (THEN &rest ELSE)
+  "Macro that evaluates THEN when in dired-mode, ELSE otherwise. Used to
+grab dired-mode filelists without the compiler complaining about the
+autoloading which we know has already happened."
+  `(if (eq major-mode 'dired-mode)
+       (progn (eval-when-compile (require 'git-dired)) ,THEN)
+     ,@ELSE))
+
+(defun git--multiple-filenames ()
+  (git--if-in-status-mode
+   (git--status-view-marked-or-file)
+   (git--if-in-dired-mode
+    (git--dired-view-marked-or-file)
+    (list buffer-file-name))))
+
+(defun git--single-filename ()
+  (git--if-in-status-mode
+   (git--status-view-select-filename)
+   (git--if-in-dired-mode
+    (git--dired-get-filename)
+    buffer-file-name)))
+
 (defun git--get-top-dir (&optional dir)
   "Get the top-level git directory above DIR. If nil, use default-directory."
   (git-in-lowest-existing-dir dir
@@ -1629,12 +1651,14 @@ a prefix argument, is specified, does a commit --amend."
   ;; Here and in other functions below we rely on the fact that git-status has
   ;; surely been loaded if the current major mode is git-status.
   (git--if-in-status-mode
-      (git-commit amend (git--status-view-marked-or-file))
+   (git-commit amend (git--status-view-marked-or-file))
+   (git--if-in-dired-mode 
+    (git-commit ammend (git--dired-view-marked-or-file))
     (unless buffer-file-name (error "Not a file buffer"))
     (unless (git--in-vc-mode?)
       (git--add (file-relative-name buffer-file-name))
       (vc-find-file-hook))
-    (git-commit amend (list (file-relative-name buffer-file-name)))))
+    (git-commit amend (list (file-relative-name buffer-file-name))))))
 
 (defun git-init (dir)
   "Initialize a git repository."
@@ -2302,7 +2326,8 @@ behave as if there is no curent branch (error or nil)."
   "Error out from interactive if current buffer is not in git revision control,
 and it's not a git-status-buffer."
   (if (not (or (and buffer-file-name (git--in-vc-mode?))
-               (eq major-mode 'git-status-mode)))
+               (eq major-mode 'git-status-mode)
+               (eq major-mode 'dired-mode)))
       (error "Current buffer must be a file under git revision control")))
 
 ;; The git-diff-* family of functions diffs a buffer or the selected file
@@ -2313,9 +2338,7 @@ and it's not a git-status-buffer."
 using ediff."
   (interactive)
   (git--require-buffer-in-git)
-  (git--diff (git--if-in-status-mode
-                 (git--status-view-select-filename)
-               buffer-file-name)
+  (git--diff (git--single-filename)
              "HEAD:"))
 
 (defun git-diff-index()
@@ -2323,9 +2346,7 @@ using ediff."
 in index, using ediff"
   (interactive)
   (git--require-buffer-in-git)
-  (git--diff (git--if-in-status-mode
-                 (git--status-view-select-filename)
-               buffer-file-name)
+  (git--diff (git--single-filename)
              ;; luckily ":file" means file as currently in the index
              ":"))
 
@@ -2416,9 +2437,7 @@ that variable in .emacs.
   "Diff current buffer against a selectable \"baseline\" commit"
   (interactive)
   (git--require-buffer-in-git)
-  (git--diff (git--if-in-status-mode
-              (git--status-view-select-filename)
-              buffer-file-name)
+  (git--diff (git--single-filename)
              (concat (git-baseline) ":")))
 
 (defun git-diff-other(commit)
@@ -2428,9 +2447,7 @@ that variable in .emacs.
      (git--require-buffer-in-git)
      (list (git--select-revision "Diff against commit: "))))
   (git--require-buffer-in-git)
-  (git--diff (git--if-in-status-mode
-                 (git--status-view-select-filename)
-               buffer-file-name)
+  (git--diff (git--single-filename)
              (concat commit ":")))
 
 ;; git-diff-all variants
@@ -2462,9 +2479,7 @@ that variable in .emacs.
   (interactive)                         ; haha
   (git--require-buffer-in-git)
   (git--diff
-   (git--if-in-status-mode
-       (git--status-view-select-filename)
-     buffer-file-name )
+   (git--single-filename)
    ":"                                  ; index
    ;; before ediff
    (lambda()

@@ -156,9 +156,7 @@ default-directory is inside the repo."
 git-status-mode."
   (interactive)
   (git--require-buffer-in-git)
-  (git--log-view (git--if-in-status-mode
-                     (git--status-view-marked-or-file)
-                   (list buffer-file-name))))
+  (git--log-view (git--multiple-filenames)))
  
 (defun git-log ()
   "Launch the git log view for the whole repository"
