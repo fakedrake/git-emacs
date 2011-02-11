@@ -1,8 +1,15 @@
+;; Git dired mode support, part of git-emacs
+;;
+;; See git-emacs.el for license information
+
+;;TODO when current line have no file.
+
+(require 'git-emacs)
 
 (defun git--dired-view-marked-or-file ()
   (let ((files (git--dired-marked-files)))
     (when (null files)
-      (setq files (list (git--status-view-select-filename))))
+      (setq files (list (git--dired-get-filename))))
     files))
 
 (defun git--dired-marked-files ()
