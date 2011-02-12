@@ -2,14 +2,13 @@
 ;;
 ;; See git-emacs.el for license information
 
-;;TODO when current line have no file.
-
 (require 'git-emacs)
+(require 'dired)
 
 (defun git--dired-view-marked-or-file ()
   (let ((files (git--dired-marked-files)))
     (when (null files)
-      (setq files (list (git--dired-get-filename))))
+      (setq files (list (git--dired-single-filename))))
     files))
 
 (defun git--dired-marked-files ()
@@ -29,5 +28,39 @@
 
 (defun git--dired-get-filename ()
   (dired-get-filename t t))
+
+(defun git--dired-single-filename ()
+  (let ((file (git--dired-get-filename)))
+    (unless file
+      (error "There is no file"))
+    file))
+
+;; mode-line support
+
+(defun git--dired-modeline-string (directory)
+  (let* ((default-directory (file-name-as-directory directory))
+	 (branch (git--branch-current)))
+    (when branch
+      (format "Git:%s" branch))))
+
+(defvar git--dired-modeline-in-dired nil)
+(make-variable-buffer-local 'git--dired-modeline-in-dired)
+
+(defun git--dired-modeline-install-format ()
+  (unless (memq 'git--dired-modeline-in-dired mode-line-format)
+    (let* ((cell (assq 'vc-mode mode-line-format))
+	   (tail (member cell mode-line-format)))
+      (setcdr tail (cons 'git--dired-modeline-in-dired (cdr tail))))))
+
+(defun git--dired-modeline-redraw-format ()
+  (setq git--dired-modeline-in-dired (git--dired-modeline-string default-directory))
+  (force-mode-line-update))
+
+(defun git-dired-modeline-function ()
+  (git--dired-modeline-install-format)
+  (git--dired-modeline-redraw-format))
+
+;;TODO when call add-hook
+(add-hook 'dired-mode-hook 'git-dired-modeline-function)
 
 (provide 'git-dired)

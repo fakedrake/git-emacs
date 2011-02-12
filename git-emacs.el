@@ -302,7 +302,9 @@ buffer popped to with this function will have a local
       (add-hook 'kill-buffer-hook
                 (lexical-let ((saved-config git--saved-window-configuration))
                   #'(lambda()
-                      (set-window-configuration saved-config)
+                      (when (and saved-config
+                                 (buffer-live-p saved-config))
+                        (set-window-configuration saved-config))
                       )) nil t)) ;; !append local
     popped-buffer))
 
@@ -379,7 +381,7 @@ autoloading which we know has already happened."
   (git--if-in-status-mode
    (git--status-view-select-filename)
    (git--if-in-dired-mode
-    (git--dired-get-filename)
+    (git--dired-single-filename)
     buffer-file-name)))
 
 (defun git--get-top-dir (&optional dir)
@@ -681,6 +683,20 @@ if git config fails (behaviour if unconfigured as of version 1.7.1)."
   "Execute 'git tag ARGS', return the result as string."
   (apply #'git--exec-string "tag" args))
 
+(defun git--branch-alist ()
+  (with-temp-buffer
+    (let (ret)
+      (git--exec "branch" (current-buffer) nil "-a")
+      (goto-char (point-min))
+      (while (not (eobp))
+	(when (looking-at "^\\(?:\\([*]\\)\\| \\) \\(.*\\)")
+	  (setq ret (cons (cons (match-string 2) (and (match-string 1) t)) ret)))
+	(forward-line 1))
+      (nreverse ret))))
+
+(defun git--branch-current ()
+  (car (rassoc t (git--branch-alist))))
+
 (defvar git--tag-history nil "History variable for tags entered by user.")
 
 (defalias 'git-snapshot 'git-tag)
@@ -959,7 +975,7 @@ SIZE is 5, but it will be longer if needed (due to conflicts)."
             (setq current-branch branch)))))
     (cons (nreverse branches) current-branch)))
 
-(defun git--cat-file (buffer-name &rest args)
+(defun git--cat-file (buffer-name coding-system &rest args)
   "Execute 'git cat-file ARGS' and return a new buffer named BUFFER-NAME
 with the file content"
   (let ((buffer (get-buffer-create buffer-name)))
@@ -971,6 +987,9 @@ with the file content"
       (let ((buffer-file-name buffer-name)) (set-auto-mode))
       (apply #'git--exec-buffer "cat-file" args)
 
+      ;;FIXME When `process-coding-system-alist' hooks "git" command, is this work?
+      (decode-coding-region (point-min) (point-max) coding-system)
+      
       ;; set buffer readonly & quit
       (setq buffer-read-only t)
 
@@ -1324,6 +1343,7 @@ buffer. If there is no common base, returns nil."
          (base-fileinfo (cdr-safe (assq 1 stage-and-fileinfo)))
          (base-buffer (when base-fileinfo
                         (git--cat-file (format "*Base*: %s" rel-filename)
+                                       buffer-file-coding-system
                                        "blob"
                                        (git--fileinfo->sha1 base-fileinfo)))))
     base-buffer))
@@ -1626,7 +1646,7 @@ Returns the buffer."
                 #'(lambda()
                     (ignore-errors
                       (when git--commit-last-diff-file-buffer
-                          (kill-buffer git--commit-last-diff-file-buffer))))
+                        (kill-buffer git--commit-last-diff-file-buffer))))
                 t t)                    ; append, local
 
       ;; Set cursor to message area
@@ -1993,6 +2013,7 @@ of hook."
               (setq buf2 (git--cat-file (if (equal rev ":")
                                             (concat "<index>" filerev)
                                           filerev)
+                                        (buffer-local-value 'buffer-file-coding-system buf1)
                                         "blob" filerev)))))
     (when (eq 0 (compare-buffer-substrings buf1 nil nil buf2 nil nil))
       (kill-buffer buf2)

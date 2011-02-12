@@ -267,27 +267,30 @@ See also function `git-blame-mode'."
 
 (defun git-blame-sentinel (proc status)
   (with-current-buffer (process-buffer proc)
-    (with-current-buffer git-blame-file
-      (setq git-blame-proc nil)
-      (if git-blame-update-queue
-          (git-blame-delayed-update))))
-  ;;(kill-buffer (process-buffer proc))
-  ;;(message "git blame finished")
-  )
+    (when (memq (process-status proc) '(exit signal))
+      (when (buffer-live-p git-blame-file)
+        (with-current-buffer git-blame-file
+          (setq git-blame-proc nil)
+          (if git-blame-update-queue
+              (git-blame-delayed-update))))
+      (kill-buffer (process-buffer proc))
+      (if (= (process-exit-status proc) 0)
+          (message "git blame finished")
+        (message "git blame abnormaly finished")))))
 
 (defvar in-blame-filter nil)
 
 (defun git-blame-filter (proc str)
-  (save-excursion
-    (set-buffer (process-buffer proc))
-    (goto-char (process-mark proc))
-    (insert-before-markers str)
-    (goto-char 0)
-    (unless in-blame-filter
-      (let ((more t)
-            (in-blame-filter t))
-        (while more
-          (setq more (git-blame-parse)))))))
+  (with-current-buffer (process-buffer proc)
+    (save-excursion
+      (goto-char (process-mark proc))
+      (insert-before-markers str)
+      (goto-char (point-min))
+      (unless in-blame-filter
+        (let ((more t)
+              (in-blame-filter t))
+          (while more
+            (setq more (git-blame-parse))))))))
 
 (defun git-blame-parse ()
   (cond ((looking-at "\\([0-9a-f]\\{40\\}\\) \\([0-9]+\\) \\([0-9]+\\) \\([0-9]+\\)\n")
@@ -320,43 +323,51 @@ See also function `git-blame-mode'."
         (t
          nil)))
 
+(defun git--blame-goto-line (line)
+  (goto-char (point-min))
+  (forward-line (1- line)))
+
 (defun git-blame-new-commit (hash src-line res-line num-lines)
-  (save-excursion
-    (set-buffer git-blame-file)
-    (let ((info (gethash hash git-blame-cache))
-          (inhibit-point-motion-hooks t)
-          (inhibit-modification-hooks t))
-      (when (not info)
-	;; Assign a random color to each new commit info
-	;; Take care not to select the same color multiple times
-	(let ((color (if git-blame-colors
-			 (git-blame-random-pop git-blame-colors)
-		       git-blame-ancient-color)))
-          (setq info (list hash src-line res-line num-lines
-                           (git-describe-commit hash)
-                           (cons 'color color))))
-        (puthash hash info git-blame-cache))
-      (goto-line res-line)
-      (while (> num-lines 0)
-        (if (get-text-property (point) 'git-blame)
-            (forward-line)
-          (let* ((start (point))
-                 (end (progn (forward-line 1) (point)))
-                 (ovl (make-overlay start end)))
-            (push ovl git-blame-overlays)
-            (overlay-put ovl 'git-blame info)
-            (overlay-put ovl 'help-echo hash)
-            (overlay-put ovl 'face (list :background
-                                         (cdr (assq 'color (nthcdr 5 info)))))
-            ;; the point-entered property doesn't seem to work in overlays
-            ;;(overlay-put ovl 'point-entered
-            ;;             `(lambda (x y) (git-blame-identify ,hash)))
-            (let ((modified (buffer-modified-p)))
-              (put-text-property (if (= start 1) start (1- start)) (1- end)
-                                 'point-entered
-                                 `(lambda (x y) (git-blame-identify ,hash)))
-              (set-buffer-modified-p modified))))
-        (setq num-lines (1- num-lines))))))
+  (when (buffer-live-p git-blame-file)
+    (with-current-buffer git-blame-file
+      (save-excursion
+        (save-restriction
+          (widen)
+          (let ((buffer-read-only)
+                (info (gethash hash git-blame-cache))
+                (inhibit-point-motion-hooks t)
+                (inhibit-modification-hooks t))
+            (when (not info)
+              ;; Assign a random color to each new commit info
+              ;; Take care not to select the same color multiple times
+              (let ((color (if git-blame-colors
+                               (git-blame-random-pop git-blame-colors)
+                             git-blame-ancient-color)))
+                (setq info (list hash src-line res-line num-lines
+                                 (git-describe-commit hash)
+                                 (cons 'color color))))
+              (puthash hash info git-blame-cache))
+            (git--blame-goto-line res-line)
+            (while (> num-lines 0)
+              (if (get-text-property (point) 'git-blame)
+                  (forward-line)
+                (let* ((start (point))
+                       (end (progn (forward-line 1) (point)))
+                       (ovl (make-overlay start end)))
+                  (push ovl git-blame-overlays)
+                  (overlay-put ovl 'git-blame info)
+                  (overlay-put ovl 'help-echo hash)
+                  (overlay-put ovl 'face (list :background
+                                               (cdr (assq 'color (nthcdr 5 info)))))
+                  ;; the point-entered property doesn't seem to work in overlays
+                  ;;(overlay-put ovl 'point-entered
+                  ;;             `(lambda (x y) (git-blame-identify ,hash)))
+                  (let ((modified (buffer-modified-p)))
+                    (put-text-property (if (= start 1) start (1- start)) (1- end)
+                                       'point-entered
+                                       `(lambda (x y) (git-blame-identify ,hash)))
+                    (set-buffer-modified-p modified))))
+              (setq num-lines (1- num-lines)))))))))
 
 (defun git-blame-add-info (key value)
   (if git-blame-current
