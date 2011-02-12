@@ -213,6 +213,7 @@ See also function `git-blame-mode'."
       ;; Should maybe queue up a new run here
       (message "Already running git blame")
     (let ((display-buf (current-buffer))
+          ;;FIXME conflict other process.
           (blame-buf (get-buffer-create
                       (concat " git blame for " (buffer-name))))
           (args '("--incremental" "--contents" "-")))

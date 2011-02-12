@@ -694,6 +694,7 @@ if git config fails (behaviour if unconfigured as of version 1.7.1)."
 	(forward-line 1))
       (nreverse ret))))
 
+;;TODO see git--current-branch at least different about (no branch)
 (defun git--branch-current ()
   (car (rassoc t (git--branch-alist))))
 
@@ -1652,7 +1653,10 @@ Returns the buffer."
       ;; Set cursor to message area
       (goto-char cur-pos)
 
-      (when git--log-flyspell-mode (flyspell-mode t))
+      (when git--log-flyspell-mode 
+        (flyspell-mode t)
+        (setq flyspell-generic-check-word-predicate 
+              'git--commit-flyspell-verify))
 
       ;; comment hook
       (run-hooks 'git-comment-hook)
@@ -1661,6 +1665,11 @@ Returns the buffer."
                (or prepend-status-msg "")))
     (git--pop-to-buffer buffer)
     buffer))
+
+(defun git--commit-flyspell-verify ()
+  (save-excursion
+    (forward-line 0)
+    (not (looking-at "^#"))))
 
 (defun git-commit-file (&optional amend)
   "Runs git commit with the file in the current buffer, or with the selected
@@ -2633,6 +2642,5 @@ usual pre / post work: ask for save, ask for refresh."
   (redisplay t)
   (sleep-for 1.5)                       ; let the user digest message
   (git-after-working-dir-change))
-
 
 (provide 'git-emacs)
