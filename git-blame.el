@@ -237,7 +237,7 @@ See also function `git-blame-mode'."
       (process-send-region git-blame-proc (point-min) (point-max))
       (process-send-eof git-blame-proc))))
 
-(defun remove-git-blame-text-properties (start end)
+(defun git-blame-remove-text-properties (start end)
   (let ((modified (buffer-modified-p))
         (inhibit-read-only t))
     (remove-text-properties start end '(point-entered nil))
@@ -247,7 +247,7 @@ See also function `git-blame-mode'."
   "Remove all blame properties"
     (mapc 'delete-overlay git-blame-overlays)
     (setq git-blame-overlays nil)
-    (remove-git-blame-text-properties (point-min) (point-max)))
+    (git-blame-remove-text-properties (point-min) (point-max)))
 
 (defun git-blame-update-region (start end)
   "Rerun blame to get updates between START and END"
@@ -260,7 +260,7 @@ See also function `git-blame-mode'."
             (setq end (overlay-end overlay)))
         (setq git-blame-overlays (delete overlay git-blame-overlays))
         (delete-overlay overlay))))
-  (remove-git-blame-text-properties start end)
+  (git-blame-remove-text-properties start end)
   ;; We can be sure that start and end are at line breaks
   (git-blame-run (1+ (count-lines (point-min) start))
                  (count-lines (point-min) end)))
@@ -382,16 +382,16 @@ See also function `git-blame-mode'."
 (defun git-describe-commit (hash)
   (with-temp-buffer
     (call-process "git" nil t nil
-                  "log" "-1" "--pretty=oneline"
+                  "log" "-1" "--abbrev-commit" "--pretty=oneline"
                   hash)
     (buffer-substring (point-min) (1- (point-max)))))
 
 (defvar git-blame-last-identification nil)
 (make-variable-buffer-local 'git-blame-last-identification)
 (defun git-blame-identify (&optional hash)
-  (interactive)
-  (let ((info (gethash (or hash (git-blame-current-commit)) git-blame-cache)))
-    (when (and info (not (eq info git-blame-last-identification)))
+  (let ((message-log-max)               ; suppress too many *Message*
+        (info (gethash (or hash (git-blame-current-commit)) git-blame-cache)))
+    (when info
       (message "%s" (nth 4 info))
       (setq git-blame-last-identification info))))
 
