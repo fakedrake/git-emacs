@@ -1252,6 +1252,9 @@ commit, like git commit --amend will do once we commit."
 (defvar git--commit-amend nil
   "Records whether the current commit buffer is for a commit --amend")
 (make-variable-buffer-local 'git--commit-amend)
+(defvar git--commit-window-settings nil
+  "Records the window settings before preparing log buffer.")
+(make-variable-buffer-local 'git--commit-window-settings)
 
 (defun git--commit-buffer ()
   "Called when the user commits, in the commit buffer (C-cC-c).
@@ -1284,9 +1287,11 @@ Trim the buffer log, commit runs any after-commit functions."
   ;; the buffer-local value of the after-hook.
   (let ((local-git--commit-after-hook
          (when (local-variable-p 'git--commit-after-hook)
-           (cdr git--commit-after-hook)))) ; skip the "t" for local
+           (cdr git--commit-after-hook))) ; skip the "t" for local
+        (win-settings git--commit-window-settings)) 
     (kill-buffer git--commit-log-buffer)
-
+    (when (window-configuration-p win-settings)
+      (set-window-configuration win-settings))
     ;; hooks (e.g. switch branch)
     (run-hooks 'local-git--commit-after-hook 'git--commit-after-hook)))
 
@@ -1578,14 +1583,16 @@ Returns the buffer."
 
   (interactive "P")
   ;; Don't save anything on commit-index
-  (when targets (git--maybe-ask-save (if (eq t targets) nil targets)))
+  (when targets 
+    (git--maybe-ask-save (if (eq t targets) nil targets)))
 
   (let ((cur-pos nil)
         (buffer (get-buffer-create git--commit-log-buffer))
         (current-dir default-directory))
     (with-current-buffer buffer
       ;; Tell git--commit-buffer what to do
-      (setq git--commit-targets targets
+      (setq git--commit-window-settings (current-window-configuration)
+            git--commit-targets targets
             git--commit-args (append
                               (when amend '("--amend"))
                               (cond ((eq nil targets) '())
@@ -1596,6 +1603,7 @@ Returns the buffer."
 
       (local-set-key "\C-c\C-c" 'git--commit-buffer)
       (local-set-key "\C-c\C-q" 'git--quit-buffer)
+      (local-set-key "\C-c\C-k" 'git--quit-buffer)
       (erase-buffer)
       (flyspell-mode 0)               ; disable for the text we insert
       (cd current-dir)                ; if we reused the buffer

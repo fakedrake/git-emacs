@@ -267,17 +267,17 @@ See also function `git-blame-mode'."
                  (count-lines (point-min) end)))
 
 (defun git-blame-sentinel (proc status)
-  (with-current-buffer (process-buffer proc)
-    (when (memq (process-status proc) '(exit signal))
+  (when (memq (process-status proc) '(exit signal))
+    (with-current-buffer (process-buffer proc)
       (when (buffer-live-p git-blame-file)
         (with-current-buffer git-blame-file
           (setq git-blame-proc nil)
           (if git-blame-update-queue
-              (git-blame-delayed-update))))
-      (kill-buffer (process-buffer proc))
-      (if (= (process-exit-status proc) 0)
-          (message "git blame finished")
-        (message "git blame abnormaly finished")))))
+              (git-blame-delayed-update)))))
+    (kill-buffer (process-buffer proc))
+    (if (= (process-exit-status proc) 0)
+        (message "git blame finished")
+      (message "git blame abnormaly finished"))))
 
 (defvar in-blame-filter nil)
 
