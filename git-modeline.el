@@ -41,45 +41,56 @@ of mode-line-format."
 
 
 ;; Modeline decoration options
+
+(defconst git--state-decoration-small-format
+  (concat
+   "/* XPM */\n"
+   "static char * data[] = {\n"
+   "\"14 7 3 1\",\n"
+   "\" 	c None\",\n"
+   "\"+	c #202020\",\n"
+   "\".	c %s\",\n"
+   "\"      +++     \",\n"
+   "\"     +...+    \",\n"
+   "\"    +.....+   \",\n"
+   "\"    +.....+   \",\n"
+   "\"    +.....+   \",\n"
+   "\"     +...+    \",\n"
+   "\"      +++     \"};"
+   ))
+
+(defconst git--state-decoration-large-format
+  (concat
+   "/* XPM */\n"
+   "static char * data[] = {\n"
+   "\"18 13 3 1\",\n"
+   "\" 	c None\",\n"
+   "\"+	c #000000\",\n"
+   "\".	c %s\",\n"
+   "\"                  \",\n"
+   "\"       +++++      \",\n"
+   "\"      +.....+     \",\n"
+   "\"     +.......+    \",\n"
+   "\"    +.........+   \",\n"
+   "\"    +.........+   \",\n"
+   "\"    +.........+   \",\n"
+   "\"    +.........+   \",\n"
+   "\"    +.........+   \",\n"
+   "\"     +.......+    \",\n"
+   "\"      +.....+     \",\n"
+   "\"       +++++      \",\n"
+   "\"                  \"};"))
+
+
 (defun git-state-decoration-small-dot(stat)
   (git--state-mark-modeline-dot
    (git--interpret-state-mode-color stat) stat
-"/* XPM */
-static char * data[] = {
-\"14 7 3 1\",
-\" 	c None\",
-\"+	c #202020\",
-\".	c %s\",
-\"      +++     \",
-\"     +...+    \",
-\"    +.....+   \",
-\"    +.....+   \",
-\"    +.....+   \",
-\"     +...+    \",
-\"      +++     \"};"))
+   git--state-decoration-small-format))
 
 (defun git-state-decoration-large-dot(stat)
   (git--state-mark-modeline-dot
    (git--interpret-state-mode-color stat) stat
-"/* XPM */
-static char * data[] = {
-\"18 13 3 1\",
-\" 	c None\",
-\"+	c #000000\",
-\".	c %s\",
-\"                  \",
-\"       +++++      \",
-\"      +.....+     \",
-\"     +.......+    \",
-\"    +.........+   \",
-\"    +.........+   \",
-\"    +.........+   \",
-\"    +.........+   \",
-\"    +.........+   \",
-\"     +.......+    \",
-\"      +.....+     \",
-\"       +++++      \",
-\"                  \"};"))
+   git--state-decoration-large-format))
 
 (defun git--interpret-state-mode-letter(stat)
    (case stat
@@ -125,19 +136,19 @@ static char * data[] = {
       (funcall git-state-modeline-decoration stat)))
 
 (defun git--install-state-mark-modeline (stat)
+  (add-hook 'after-revert-hook 'git--update-all-state-marks nil t)
   (push `(git--state-mark-modeline
           ,(git--state-decoration-dispatch stat))
-        mode-line-format)
-  )
+        mode-line-format))
 
 (defun git--uninstall-state-mark-modeline ()
+  (remove-hook 'after-revert-hook 'git--update-all-state-marks t)
   (setq mode-line-format
         (delq nil (mapcar #'(lambda (mode)
                               (unless (eq (car-safe mode)
                                           'git--state-mark-modeline)
                                 mode))
-                   mode-line-format)))
-  )
+                   mode-line-format))))
 
 ;; autoload entry point
 (defun git--update-state-mark (stat)

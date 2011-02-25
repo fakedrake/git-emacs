@@ -1165,8 +1165,8 @@ pending commit buffer or nil if the buffer wasn't needed."
   "Update the current's buffer modeline state display."
   ;; mark depending on the fileinfo state
   (when (and buffer-file-name (git--in-vc-mode?))
-    (git--update-state-mark
-     (git--status-file (file-relative-name buffer-file-name)))))
+    (ignore-errors
+      (git--update-all-state-marks))))
 
 (defalias 'git-history 'git-log)
 
