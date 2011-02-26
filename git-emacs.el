@@ -327,7 +327,10 @@ buffer popped to with this function will have a local
   buffer popped with `git--pop-to-buffer' will restore previous
   window-configuration when killed."
   (interactive)
-  (kill-buffer))
+  (let ((win-settings git--commit-window-settings))
+    (kill-buffer)
+    (when (window-configuration-p win-settings)
+      (set-window-configuration win-settings))))
 
 (defsubst git--rev-parse (&rest args)
   "Execute 'git rev-parse ARGS', return result string."
@@ -1625,19 +1628,19 @@ Returns the buffer."
              (expand-file-name ".git/MERGE_MSG" (git--get-top-dir))))
         (when (file-readable-p merge-msg-file)
           (git--please-wait (format "Reading %s" merge-msg-file)
-            (insert-file-contents merge-msg-file)
-            (goto-char (point-max))        ; insert-file didn't move point
-            (insert "\n"))))
+                            (insert-file-contents merge-msg-file)
+                            (goto-char (point-max)) ; insert-file didn't move point
+                            (insert "\n"))))
       (setq cur-pos (point))
       (insert "\n\n")
 
       ;;git commit --dryrun or git status -- give same args as to commit
       (insert git--log-sep-line "\n")
       (git--please-wait "Reading git status"
-        (unless (eq 0 (apply #'git--commit-dryrun-compat t git--commit-args))
-          (kill-buffer nil)
-          (error "Nothing to commit%s"
-                 (if (eq t targets) "" ", try git-commit-all"))))
+                        (unless (eq 0 (apply #'git--commit-dryrun-compat t git--commit-args))
+                          (kill-buffer nil)
+                          (error "Nothing to commit%s"
+                                 (if (eq t targets) "" ", try git-commit-all"))))
 
       ;; Remove "On branch blah" it's redundant
       (goto-char cur-pos)
@@ -1669,7 +1672,11 @@ Returns the buffer."
       ;; comment hook
       (run-hooks 'git-comment-hook)
 
-      (message "%sType 'C-c C-c' to commit, 'C-c C-q' to cancel"
+      (message (substitute-command-keys
+                (concat
+                 "%s"
+                 "Type '\\[git--commit-buffer]' to commit, "
+                 "'\\[git--quit-buffer]' to cancel"))
                (or prepend-status-msg "")))
     (git--pop-to-buffer buffer)
     buffer))
