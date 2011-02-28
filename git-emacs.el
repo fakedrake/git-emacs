@@ -2102,14 +2102,19 @@ buffer instead of a new one."
           (setcdr diff-readonly-map (copy-keymap (cdr diff-readonly-map)))
           (define-key (cdr diff-readonly-map) "q" 'git--quit-buffer)))
       (let ((diff-qualifier
-             (if rev1
-                 (if (eq t rev2) (list "--cached" rev1)
-                   (if rev2 (list (format "%s..%s" rev1 rev2))
-                     (list rev1)))
+             (cond
+              ((and (null rev1) (null rev2))
+               nil)
+              ((and (null rev1) rev2)
                ;; rev1 is index. swap sides of git diff when diffing
                ;; against the index, for consistency (rev1 -> rev2)
-               (if rev2 (list "--cached" "-R" rev2)
-                 '()))))
+               (list "--cached" "-R" rev2))
+              ((eq t rev2)
+               (list "--cached" rev1))
+              (rev2
+               (list (format "%s..%s" rev1 rev2)))
+              (t
+               (list rev1)))))
         (apply #'vc-do-command buffer 'async "git" nil "diff"
                (append diff-qualifier (list "--") rel-filenames)))
       (vc-exec-after `(goto-char (point-min))))
