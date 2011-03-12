@@ -264,7 +264,7 @@ if it fails. If the command succeeds, returns the git output."
 ;; 1.7, but commit --dry-run is not available in older git. Thanks much
 ;; guys -- I get to learn to learn how to do horrible hacks like this.
 ;; Hopefully the messages aren't translated or something.
-(defun git--commit-dryrun-compat(outbuf &rest args)
+(defun git--commit-dryrun-compat (outbuf &rest args)
   "Executes commit --dry-run with the specified args, falls back to the
 older git status if that command is not present. If OUTBUF is not nil, puts
 the standard output there. Returns the git return code."
@@ -1278,7 +1278,25 @@ commit, like git commit --amend will do once we commit."
 ;;TODO
 (defun git--commit-add-file ()
   (interactive)
-  (git-add-new))
+  (let ((msg (git--commit-buffer-message)))
+    (git-add-new)
+    (git--commit-redraw-buffer msg)))
+
+(defun git--commit-redraw-buffer (&optional msg)
+  (let ((msg (or msg (ignore-errors (git--commit-buffer-message)) "")))
+    (git--commit-prepare-buffer)
+    (insert msg)))
+
+(defun git--commit-buffer-message ()
+  (save-excursion
+    (goto-char (point-min))
+    (let* ((regexp (concat "^" (regexp-quote git--log-sep-line)))
+           (begin (re-search-forward regexp nil t))
+           (end (and (re-search-forward regexp nil t)
+                     (line-beginning-position))))
+      (unless (and begin end)
+        (error "Commit buffer is broken"))
+      (git--trim-string (buffer-substring begin end)))))
 
 (defun git--commit-buffer ()
   "Called when the user commits, in the commit buffer (C-cC-c).
@@ -1293,20 +1311,15 @@ Trim the buffer log, commit runs any after-commit functions."
   ;; trail and commit
   (save-excursion
     (goto-char (point-min))
-
-    (let ((begin (search-forward git--log-sep-line nil t))
-          (end   (search-forward git--log-sep-line nil t)))
-      (when (and begin end)
-        (setq end (- end (length git--log-sep-line)))
-        ;; TODO sophisticated message
-        (message "%s" (apply #'git--commit
-                             (git--trim-string (buffer-substring begin end))
-                             git--commit-args)))))
+    (let ((msg (git--commit-buffer-message)))
+      ;; TODO sophisticated message
+      (message "%s" (apply #'git--commit msg git--commit-args))))
 
   ;; update state marks, either for the files committed or the whole repo
   (git--update-all-state-marks
    (if (eq t git--commit-targets) nil git--commit-targets))
 
+  ;;FIXME ??what is this mean?? hooks must not be a local variable.
   ;; close window and kill buffer. Some gymnastics are needed to preserve
   ;; the buffer-local value of the after-hook.
   (let ((local-git--commit-after-hook
@@ -1597,9 +1610,8 @@ button, or at the end of the file if it didn't create any."
                buffer)))
     )))
 
-(defun git--commit-prepare-buffer ()
-  (let ((cur-pos (point))
-        (inhibit-read-only t))
+(defun git--commit-prepare-buffer (&optional amend)
+  (let ((inhibit-read-only t))
     (erase-buffer)
     ;; insert info
     (git--insert-log-header-info amend)
@@ -1618,30 +1630,30 @@ button, or at the end of the file if it didn't create any."
                           (insert-file-contents merge-msg-file)
                           (goto-char (point-max)) ; insert-file didn't move point
                           (insert "\n"))))
-    (setq cur-pos (point))
-    (insert "\n\n")
+    (let ((cur-pos (point)))
+      (insert "\n\n")
 
-    ;;git commit --dryrun or git status -- give same args as to commit
-    (insert git--log-sep-line "\n")
-    (git--please-wait "Reading git status"
-                      (unless (eq 0 (apply #'git--commit-dryrun-compat t git--commit-args))
-                        (kill-buffer nil)
-                        (error "Nothing to commit%s"
-                               (if (eq t targets) "" ", try git-commit-all"))))
+      ;;git commit --dryrun or git status -- give same args as to commit
+      (insert git--log-sep-line "\n")
+      (git--please-wait "Reading git status"
+                        (unless (eq 0 (apply #'git--commit-dryrun-compat t git--commit-args))
+                          (kill-buffer nil)
+                          (error "Nothing to commit%s"
+                                 (if (eq t targets) "" ", try git-commit-all"))))
 
-    ;; Remove "On branch blah" it's redundant
-    (goto-char cur-pos)
-    (when (re-search-forward "^# On branch.*$" nil t)
-      (delete-region (line-beginning-position) (line-beginning-position 2)))
+      ;; Remove "On branch blah" it's redundant
+      (goto-char cur-pos)
+      (when (re-search-forward "^# On branch.*$" nil t)
+        (delete-region (line-beginning-position) (line-beginning-position 2)))
 
-    ;; Buttonize files to be committed, with action=diff. Assume
-    ;; that the first block of files is the one to be committed, and all
-    ;; others won't be committed.
-    (goto-char cur-pos)
-    (git--commit-buttonize-filenames t 'git--commit-diff-committed-link)
-    (git--commit-buttonize-filenames nil 'git--commit-diff-uncomitted-link)
-    ;; Set cursor to message area
-    (goto-char cur-pos)))
+      ;; Buttonize files to be committed, with action=diff. Assume
+      ;; that the first block of files is the one to be committed, and all
+      ;; others won't be committed.
+      (goto-char cur-pos)
+      (git--commit-buttonize-filenames t 'git--commit-diff-committed-link)
+      (git--commit-buttonize-filenames nil 'git--commit-diff-uncomitted-link)
+      ;; Set cursor to message area
+      (goto-char cur-pos))))
 
 (defvar git-commit-map nil)
 (unless git-commit-map
@@ -1691,14 +1703,14 @@ Returns the buffer."
            (list 'git--commit-status-font-lock-keywords t))
       (when global-font-lock-mode (font-lock-mode t))
 
-      (git--commit-prepare-buffer)
+      (git--commit-prepare-buffer amend)
 
       ;; Delete diff buffers when we're gone
       (add-hook 'kill-buffer-hook
-                #'(lambda()
-                    (ignore-errors
-                      (when git--commit-last-diff-file-buffer
-                        (kill-buffer git--commit-last-diff-file-buffer))))
+                (lambda()
+                  (ignore-errors
+                    (when git--commit-last-diff-file-buffer
+                      (kill-buffer git--commit-last-diff-file-buffer))))
                 t t)                    ; append, local
 
       (when git--log-flyspell-mode 
