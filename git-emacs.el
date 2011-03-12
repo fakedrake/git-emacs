@@ -257,6 +257,9 @@ if it fails. If the command succeeds, returns the git output."
         (error "%s" (git--trim-string (buffer-string)))))))
 
 
+(defvar git--commit-untracked-files nil)
+(make-variable-buffer-local 'git--commit-untracked-files)
+
 ;; This is nasty: the git devs changed the meaning of "git status" in git
 ;; 1.7, but commit --dry-run is not available in older git. Thanks much
 ;; guys -- I get to learn to learn how to do horrible hacks like this.
@@ -266,8 +269,10 @@ if it fails. If the command succeeds, returns the git output."
 older git status if that command is not present. If OUTBUF is not nil, puts
 the standard output there. Returns the git return code."
   ;; Going forward, this will simply succeed.
-  (let ((rc (apply #'git--exec "commit" (list outbuf nil) nil
-                   "--dry-run" args)))
+  (let* ((start (point))
+         (rc (apply #'git--exec "commit" (list outbuf nil) nil
+                    "--dry-run" args)))
+    (setq git--commit-untracked-files nil)
     (when (eq rc 129)
       ;; gotta distinguish between bad args or no --dry-run.
       (let ((has-dry-run
@@ -276,6 +281,17 @@ the standard output there. Returns the git return code."
               (git--exec-string-no-error "commit" "--no-such-arg-show-help"))))
         (unless has-dry-run
           (setq rc (apply #'git--exec "status" outbuf nil args)))))
+    (save-excursion
+      (goto-char start)
+      (when (re-search-forward "^#[ \t]*(use \"git add <file>...\"" nil t)
+        (forward-line 1)
+        (while (and (not (eobp))
+                    (looking-at "^#\\(?:[ \t]*\\(.+\\)\\)?"))
+          (let ((file (match-string 1)))
+            (when file
+              (setq git--commit-untracked-files
+                    (cons file git--commit-untracked-files))))
+          (forward-line 1))))
     rc))
 
 
@@ -1259,6 +1275,11 @@ commit, like git commit --amend will do once we commit."
   "Records the window settings before preparing log buffer.")
 (make-variable-buffer-local 'git--commit-window-settings)
 
+;;TODO
+(defun git--commit-add-file ()
+  (interactive)
+  (git-add-new))
+
 (defun git--commit-buffer ()
   "Called when the user commits, in the commit buffer (C-cC-c).
 Trim the buffer log, commit runs any after-commit functions."
@@ -1576,6 +1597,64 @@ button, or at the end of the file if it didn't create any."
                buffer)))
     )))
 
+(defun git--commit-prepare-buffer ()
+  (let ((cur-pos (point))
+        (inhibit-read-only t))
+    (erase-buffer)
+    ;; insert info
+    (git--insert-log-header-info amend)
+
+    ;; real log space
+    (insert (propertize git--log-sep-line 'face 'git--log-line-face) "\n")
+
+    (insert "\n")
+    ;; If amend, insert last commit msg.
+    (when amend (insert (git--last-log-message)))
+    ;; Insert .git/MERGE_MSG if exists
+    (let ((merge-msg-file
+           (expand-file-name ".git/MERGE_MSG" (git--get-top-dir))))
+      (when (file-readable-p merge-msg-file)
+        (git--please-wait (format "Reading %s" merge-msg-file)
+                          (insert-file-contents merge-msg-file)
+                          (goto-char (point-max)) ; insert-file didn't move point
+                          (insert "\n"))))
+    (setq cur-pos (point))
+    (insert "\n\n")
+
+    ;;git commit --dryrun or git status -- give same args as to commit
+    (insert git--log-sep-line "\n")
+    (git--please-wait "Reading git status"
+                      (unless (eq 0 (apply #'git--commit-dryrun-compat t git--commit-args))
+                        (kill-buffer nil)
+                        (error "Nothing to commit%s"
+                               (if (eq t targets) "" ", try git-commit-all"))))
+
+    ;; Remove "On branch blah" it's redundant
+    (goto-char cur-pos)
+    (when (re-search-forward "^# On branch.*$" nil t)
+      (delete-region (line-beginning-position) (line-beginning-position 2)))
+
+    ;; Buttonize files to be committed, with action=diff. Assume
+    ;; that the first block of files is the one to be committed, and all
+    ;; others won't be committed.
+    (goto-char cur-pos)
+    (git--commit-buttonize-filenames t 'git--commit-diff-committed-link)
+    (git--commit-buttonize-filenames nil 'git--commit-diff-uncomitted-link)
+    ;; Set cursor to message area
+    (goto-char cur-pos)))
+
+(defvar git-commit-map nil)
+(unless git-commit-map
+  (let ((map (make-sparse-keymap)))
+    
+    (define-key map "\C-c\C-a" 'git--commit-add-file)
+    (define-key map "\C-c\C-c" 'git--commit-buffer)
+    (define-key map "\C-c\C-q" 'git--quit-buffer)
+    (define-key map "\C-c\C-k" 'git--quit-buffer)
+
+    (setq git-commit-map map)))
+
+
 (defun git-commit (&optional amend targets prepend-status-msg)
   "Does git commit with a temporary prompt buffer. If AMEND or a prefix argument
 is specified, does git commit --amend. TARGETS can be nil (commit staged files)
@@ -1589,8 +1668,7 @@ Returns the buffer."
   (when targets 
     (git--maybe-ask-save (if (eq t targets) nil targets)))
 
-  (let ((cur-pos nil)
-        (buffer (get-buffer-create git--commit-log-buffer))
+  (let ((buffer (get-buffer-create git--commit-log-buffer))
         (current-dir default-directory))
     (with-current-buffer buffer
       ;; Tell git--commit-buffer what to do
@@ -1604,55 +1682,17 @@ Returns the buffer."
                                     (t (error "Invalid targets: %S" targets))))
             git--commit-amend amend)
 
-      (local-set-key "\C-c\C-c" 'git--commit-buffer)
-      (local-set-key "\C-c\C-q" 'git--quit-buffer)
-      (local-set-key "\C-c\C-k" 'git--quit-buffer)
-      (erase-buffer)
+      (use-local-map git-commit-map)
+
       (flyspell-mode 0)               ; disable for the text we insert
       (cd current-dir)                ; if we reused the buffer
 
       (set (make-local-variable 'font-lock-defaults)
            (list 'git--commit-status-font-lock-keywords t))
       (when global-font-lock-mode (font-lock-mode t))
-      ;; insert info
-      (git--insert-log-header-info amend)
 
-      ;; real log space
-      (insert (propertize git--log-sep-line 'face 'git--log-line-face) "\n")
+      (git--commit-prepare-buffer)
 
-      (insert "\n")
-      ;; If amend, insert last commit msg.
-      (when amend (insert (git--last-log-message)))
-      ;; Insert .git/MERGE_MSG if exists
-      (let ((merge-msg-file
-             (expand-file-name ".git/MERGE_MSG" (git--get-top-dir))))
-        (when (file-readable-p merge-msg-file)
-          (git--please-wait (format "Reading %s" merge-msg-file)
-                            (insert-file-contents merge-msg-file)
-                            (goto-char (point-max)) ; insert-file didn't move point
-                            (insert "\n"))))
-      (setq cur-pos (point))
-      (insert "\n\n")
-
-      ;;git commit --dryrun or git status -- give same args as to commit
-      (insert git--log-sep-line "\n")
-      (git--please-wait "Reading git status"
-                        (unless (eq 0 (apply #'git--commit-dryrun-compat t git--commit-args))
-                          (kill-buffer nil)
-                          (error "Nothing to commit%s"
-                                 (if (eq t targets) "" ", try git-commit-all"))))
-
-      ;; Remove "On branch blah" it's redundant
-      (goto-char cur-pos)
-      (when (re-search-forward "^# On branch.*$" nil t)
-        (delete-region (line-beginning-position) (line-beginning-position 2)))
-
-      ;; Buttonize files to be committed, with action=diff. Assume
-      ;; that the first block of files is the one to be committed, and all
-      ;; others won't be committed.
-      (goto-char cur-pos)
-      (git--commit-buttonize-filenames t 'git--commit-diff-committed-link)
-      (git--commit-buttonize-filenames nil 'git--commit-diff-uncomitted-link)
       ;; Delete diff buffers when we're gone
       (add-hook 'kill-buffer-hook
                 #'(lambda()
@@ -1660,9 +1700,6 @@ Returns the buffer."
                       (when git--commit-last-diff-file-buffer
                         (kill-buffer git--commit-last-diff-file-buffer))))
                 t t)                    ; append, local
-
-      ;; Set cursor to message area
-      (goto-char cur-pos)
 
       (when git--log-flyspell-mode 
         (flyspell-mode t)
