@@ -62,5 +62,6 @@
 
 ;;TODO when call add-hook
 (add-hook 'dired-mode-hook 'git-dired-modeline-function)
+(add-hook 'dired-after-readin-hook 'git-dired-modeline-function)
 
 (provide 'git-dired)
