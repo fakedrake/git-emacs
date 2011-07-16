@@ -160,6 +160,8 @@ of mode-line-format."
   "Updates the state marks of all the buffers visiting the REPO-OR-FILELIST,
 which is a repository dir or a list of files. This is more efficient than
 doing update--state-mark for each buffer."
+  
+  (git--uninstall-state-mark-modeline)
   (let ((buffers (git--find-buffers repo-or-filelist)))
     (when (and buffers git-state-modeline-decoration)
       ;; Use a hash table to find buffers after status-index and ls-files.
