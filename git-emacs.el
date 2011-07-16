@@ -299,6 +299,15 @@ the standard output there. Returns the git return code."
 ;; utilities
 ;;-----------------------------------------------------------------------------
 
+(defvar git--file-guessed-coding-system-threshold 30000)
+(defun git--file-guessed-coding-system (file)
+  (let ((cs (car (find-operation-coding-system 'insert-file-contents file))))
+    (when (or (null cs) (eq cs 'undecided))
+      (with-temp-buffer
+        (insert-file-contents file nil 0 git--file-guessed-coding-system-threshold)
+        (setq cs buffer-file-coding-system)))
+    cs))
+
 (defun git--trim-tail (str)
   "Trim spaces / newlines from the end of STR."
   (let ((end (- (length str) 1)))
@@ -307,7 +316,7 @@ the standard output there. Returns the git return code."
       (decf end))
     (substring str 0 (+ end 1))))
 
-(defun git--pop-to-buffer(buffer)
+(defun git--pop-to-buffer (buffer)
   "Wrapper around `pop-to-buffer', stores window configuration
 from before `pop-to-buffer' call for later restoration. Every
 buffer popped to with this function will have a local
@@ -2083,11 +2092,11 @@ of hook."
 	;; get relative to git root dir
 	(cd (git--get-top-dir (file-name-directory abspath)))
 	(let ((filerev (concat rev (file-relative-name abspath))))
-              (setq buf2 (git--cat-file (if (equal rev ":")
-                                            (concat "<index>" filerev)
-                                          filerev)
-                                        (buffer-local-value 'buffer-file-coding-system buf1)
-                                        "blob" filerev)))))
+          (setq buf2 (git--cat-file (if (equal rev ":")
+                                        (concat "<index>" filerev)
+                                      filerev)
+                                    (buffer-local-value 'buffer-file-coding-system buf1)
+                                    "blob" filerev)))))
     (when (eq 0 (compare-buffer-substrings buf1 nil nil buf2 nil nil))
       (kill-buffer buf2)
       (error "No differences vs. %s"
@@ -2111,7 +2120,6 @@ of hook."
                         (set-window-configuration saved-config)))))
               nil t)                     ; prepend, buffer-local
     ))
-
 
 (defun git--diff-many (files &optional rev1 rev2 dont-ask-save reuse-buffer)
   "Shows a diff window for the specified files and revisions, since we can't
