@@ -1305,11 +1305,14 @@ commit, like git commit --amend will do once we commit."
 
 (defun git--comit-buffer-args ()
   (let* ((author (git--comit-buffer-header-value "Author"))
+         (email (git--comit-buffer-header-value "Email"))
          (date-str (git--comit-buffer-header-value "Date"))
          (date (git--commit-buffer-parse-date date-str)))
-    `(,@(when author (list "--author" author))
-      ,@(when date (list "--date" 
-                         (format-time-string "%Y-%m-%d %H:%M:%S" date))))))
+    `(,@(and author
+             (list "--author" (format "%s <%s>" author (or email ""))))
+      ,@(and date
+             (list "--date" 
+                   (format-time-string "%Y-%m-%d %H:%M:%S" date))))))
 
 ;; parse `git--insert-log-header-info' ISO 8601 format or `git--today' format
 (defun git--commit-buffer-parse-date (string)
