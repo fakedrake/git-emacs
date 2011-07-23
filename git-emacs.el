@@ -1334,7 +1334,8 @@ commit, like git commit --amend will do once we commit."
            (diff (and diff-h diff-m
                       (* (+ (* diff-h 60 60) (* diff-m 60))
                          (if (string= "-" sign) 1 -1)))))
-      (encode-time sec min hour day month year diff))))
+      ;; currently ignore timezone
+      (encode-time sec min hour day month year))))
 
 (defun git--commit-buffer-message ()
   (save-excursion
