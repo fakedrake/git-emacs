@@ -1296,6 +1296,46 @@ commit, like git commit --amend will do once we commit."
     (git--commit-prepare-buffer)
     (insert msg)))
 
+(defun git--comit-buffer-header-value (key)
+  (let ((regexp (format "^# *%s *: \\(.*\\)" key)))
+    (save-excursion
+      (goto-char (point-min))
+      (when (re-search-forward regexp nil t)
+        (match-string-no-properties 1)))))
+
+(defun git--comit-buffer-args ()
+  (let* ((author (git--comit-buffer-header-value "Author"))
+         (date-str (git--comit-buffer-header-value "Date"))
+         (date (git--commit-buffer-parse-date date-str)))
+    `(,@(when author (list "--author" author))
+      ,@(when date (list "--date" 
+                         (format-time-string "%Y-%m-%d %H:%M:%S" date))))))
+
+(defun git--commit-buffer-parse-date (string)
+  (unless (string-match (concat 
+                         "^"
+                         "\\([0-9]+\\)-\\([0-9]+\\)-\\([0-9]+\\)"
+                         " "
+                         "\\([0-9]+\\):\\([0-9]+\\):\\([0-9]+\\)"
+                         "\\(?: \\([-+]\\)\\([0-9]\\{2\\}\\)\\([0-9]\\{2\\}\\)\\)?") 
+                        string)
+    (error "Unknown date format %s" string))
+  (let ((getter (lambda (i) (and (match-string i string)
+                                 (string-to-number (match-string i string))))))
+    (let* ((year (funcall getter 1))
+           (month (funcall getter 2))
+           (day (funcall getter 3))
+           (hour (funcall getter 4))
+           (min (funcall getter 5))
+           (sec (funcall getter 6))
+           (sign (match-string 7 string))
+           (diff-h (funcall getter 8))
+           (diff-m (funcall getter 9))
+           (diff (and diff-h diff-m
+                      (* (+ (* diff-h 60 60) (* diff-m 60))
+                         (if (string= "-" sign) 1 -1)))))
+      (encode-time sec min hour day month year diff))))
+
 (defun git--commit-buffer-message ()
   (save-excursion
     (goto-char (point-min))
@@ -1320,9 +1360,10 @@ Trim the buffer log, commit runs any after-commit functions."
   ;; trail and commit
   (save-excursion
     (goto-char (point-min))
-    (let ((msg (git--commit-buffer-message)))
+    (let ((msg (git--commit-buffer-message))
+          (args (git--comit-buffer-args)))
       ;; TODO sophisticated message
-      (message "%s" (apply #'git--commit msg git--commit-args))))
+      (message "%s" (apply #'git--commit msg (append git--commit-args args)))))
 
   ;; update state marks, either for the files committed or the whole repo
   (git--update-all-state-marks
