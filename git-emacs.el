@@ -1258,7 +1258,7 @@ commit, like git commit --amend will do once we commit."
                         (concat "--pretty=format:"
                                 "# Author : %an%n"
                                 "# Email  : %ae%n"
-                                "# Date   : %ci%n"
+                                "# Date   : %ai%n"
                                 "# Amend  : %h%n")))
     (insert
      "# Author : " (git--config-get-author)  "\n"
@@ -1311,6 +1311,7 @@ commit, like git commit --amend will do once we commit."
       ,@(when date (list "--date" 
                          (format-time-string "%Y-%m-%d %H:%M:%S" date))))))
 
+;; parse `git--insert-log-header-info' ISO 8601 format or `git--today' format
 (defun git--commit-buffer-parse-date (string)
   (unless (string-match (concat 
                          "^"
