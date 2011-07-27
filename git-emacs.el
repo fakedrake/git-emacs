@@ -1296,20 +1296,26 @@ commit, like git commit --amend will do once we commit."
     (git--commit-prepare-buffer)
     (insert msg)))
 
-(defun git--comit-buffer-header-value (key)
+(defun git--commit-buffer-header-value (key)
   (let ((regexp (format "^# *%s *: \\(.*\\)" key)))
     (save-excursion
       (goto-char (point-min))
       (when (re-search-forward regexp nil t)
         (match-string-no-properties 1)))))
 
-(defun git--comit-buffer-args ()
-  (let* ((author (git--comit-buffer-header-value "Author"))
-         (email (git--comit-buffer-header-value "Email"))
-         (date-str (git--comit-buffer-header-value "Date"))
+(defun git--commit-buffer-replace-value (key new-value)
+  (when (git--commit-buffer-header-value key)
+    (replace-match new-value nil nil nil 1)))
+
+(defun git--commit-buffer-args ()
+  (let* ((author (git--commit-buffer-header-value "Author"))
+         (email (git--commit-buffer-header-value "Email"))
+         (date-str (git--commit-buffer-header-value "Date"))
          (date (git--commit-buffer-parse-date date-str)))
     `(,@(and author
-             (list "--author" (format "%s <%s>" author (or email ""))))
+             (list "--author" (if (and email (> (length email) 0))
+                                  (format "%s <%s>" author email)
+                                author)))
       ,@(and date
              (list "--date" 
                    (format-time-string "%Y-%m-%d %H:%M:%S" date))))))
@@ -1338,7 +1344,7 @@ commit, like git commit --amend will do once we commit."
            (diff (and diff-h diff-m
                       (* (+ (* diff-h 60 60) (* diff-m 60))
                          (if (string= "-" sign) 1 -1)))))
-      ;; currently ignore timezone
+      ;; currently ignore the timezone
       (encode-time sec min hour day month year))))
 
 (defun git--commit-buffer-message ()
@@ -1366,7 +1372,7 @@ Trim the buffer log, commit runs any after-commit functions."
   (save-excursion
     (goto-char (point-min))
     (let ((msg (git--commit-buffer-message))
-          (args (git--comit-buffer-args)))
+          (args (git--commit-buffer-args)))
       ;; TODO sophisticated message
       (message "%s" (apply #'git--commit msg (append git--commit-args args)))))
 
