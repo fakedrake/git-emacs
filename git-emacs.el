@@ -840,7 +840,7 @@ nil if there is no current branch."
 (defsubst git--last-log-message ()
   "Return the last commit message, as a possibly multiline string, with an "
   "ending newline,"
-  (git--log "--max-count=1" "--pretty=format:%s%n%b"))
+  (git--log "--max-count=1" "--pretty=format:%B"))
 
 (defun git--get-relative-to-top(filename)
   (file-relative-name filename
@@ -1807,7 +1807,7 @@ a prefix argument, is specified, does a commit --amend."
   (git--if-in-status-mode
    (git-commit amend (git--status-view-marked-or-file))
    (git--if-in-dired-mode 
-    (git-commit ammend (git--dired-view-marked-or-file))
+    (git-commit amend (git--dired-view-marked-or-file))
     (unless buffer-file-name (error "Not a file buffer"))
     (unless (git--in-vc-mode?)
       (git--add (file-relative-name buffer-file-name))
