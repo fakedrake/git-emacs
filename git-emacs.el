@@ -2782,15 +2782,19 @@ usual pre / post work: ask for save, ask for refresh."
 (defvar git-emacs-dot-timer nil)
 
 (defun git-install-monitor (secs)
+  ;; inital delay is 3sec
   (run-with-timer
-   0 secs
+   3 secs
    (lambda (p)
-     (loop for buffer in (buffer-list) do
-           (with-current-buffer buffer
-             (when (and buffer-file-name (git--in-vc-mode?))
-               (let ((top (expand-file-name ".git/index" (git--get-top-dir))))
-                 (when (> p (second (time-since (elt (file-attributes top) 4))))
-                   (git--update-modeline)))))))
+     ;; iterating visible buffers
+     (let ((visible-buffers 
+            (mapcar '(lambda (window) (window-buffer window)) (window-list))))
+       (loop for buffer in visible-buffers do
+             (with-current-buffer buffer
+               (when (and buffer-file-name (git--in-vc-mode?))
+                 (let ((top (expand-file-name ".git/index" (git--get-top-dir))))
+                   (when (> p (second (time-since (elt (file-attributes top) 4))))
+                     (git--update-modeline))))))))
    secs))
 
 (provide 'git-emacs)
