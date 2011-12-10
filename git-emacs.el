@@ -1378,7 +1378,7 @@ Trim the buffer log, commit runs any after-commit functions."
     (let ((msg (git--commit-buffer-message))
           (args (git--commit-buffer-args)))
       ;; TODO sophisticated message
-      (message "%s" (apply #'git--commit msg (append git--commit-args args)))))
+      (message "%s" (apply #'git--commit msg (append args git--commit-args)))))
 
   ;; update state marks, either for the files committed or the whole repo
   (git--update-all-state-marks
@@ -1732,6 +1732,14 @@ button, or at the end of the file if it didn't create any."
     (setq git-commit-map map)))
 
 
+(defun git-commit-directory (&optional prepend-status-msg)
+  "Git commit with current directory.
+See `git-commit'
+"
+  (interactive)
+  (git-commit nil (list (expand-file-name default-directory))
+              prepend-status-msg))
+
 (defun git-commit (&optional amend targets prepend-status-msg)
   "Does git commit with a temporary prompt buffer. If AMEND or a prefix argument
 is specified, does git commit --amend. TARGETS can be nil (commit staged files)
@@ -1786,12 +1794,12 @@ Returns the buffer."
       ;; comment hook
       (run-hooks 'git-comment-hook)
 
-      (message (substitute-command-keys
+      (message "%s%s" 
+               (or prepend-status-msg "")
+               (substitute-command-keys
                 (concat
-                 "%s"
                  "Type '\\[git--commit-buffer]' to commit, "
-                 "'\\[git--quit-buffer]' to cancel"))
-               (or prepend-status-msg "")))
+                 "'\\[git--quit-buffer]' to cancel"))))
     (git--pop-to-buffer buffer)
     buffer))
 
