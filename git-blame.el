@@ -278,7 +278,7 @@ See also function `git-blame-mode'."
         (message "git blame finished")
       (message "git blame abnormaly finished"))))
 
-(defvar in-blame-filter nil)
+(defvar git-blame-in-filter nil)
 
 (defun git-blame-filter (proc str)
   (with-current-buffer (process-buffer proc)
@@ -286,9 +286,9 @@ See also function `git-blame-mode'."
       (goto-char (process-mark proc))
       (insert-before-markers str)
       (goto-char (point-min))
-      (unless in-blame-filter
+      (unless git-blame-in-filter
         (let ((more t)
-              (in-blame-filter t))
+              (git-blame-in-filter t))
           (while more
             (setq more (git-blame-parse))))))))
 
