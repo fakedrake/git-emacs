@@ -153,6 +153,8 @@ the signature of `completing-read'.")
     :group 'git-emacs-faces))
 
 (git--face bold       "tomato" (:bold t) "tomato"  (:bold t))
+(git--face filename   "Blue" nil "LightSkyBlue"  nil)
+(git--face grayout    "gray" nil "gray"  nil)
 
 (defsubst git--bold-face (str) (propertize str 'face 'git--bold-face))
 
@@ -188,6 +190,8 @@ the signature of `completing-read'.")
 (defconst git--reg-branch  "\\([^\n]+\\)")
 (defconst git--reg-stage   "\\([0-9]+\\)")
 
+(defconst git--commit-filename-line-regexp
+  "^#[ \t]\\([^:\n]+\\):[ \t]+\\(.+\\)$")
 (defconst git--log-sep-line
   "# --------------------------- message ---------------------------")
 (defconst git--log-file-line
@@ -237,7 +241,8 @@ a failure message."
 
 (defun git--trim-string (str)
   "Trim the spaces / newlines from the beginning and end of STR."
-  (let ((begin 0) (end (- (length str) 1)))
+  (let ((begin 0) 
+        (end (1- (length str))))
     ;; trim front
     (while (and (< begin end)
                 (memq (aref str begin) '(? ?\n)))
@@ -258,6 +263,7 @@ if it fails. If the command succeeds, returns the git output."
         (error "%s" (git--trim-string (buffer-string)))))))
 
 
+;; TODO not using this variable yet.
 (defvar git--commit-untracked-files nil)
 (make-variable-buffer-local 'git--commit-untracked-files)
 
@@ -283,6 +289,14 @@ the standard output there. Returns the git return code."
         (unless has-dry-run
           (setq rc (apply #'git--exec "status" outbuf nil args)))))
     (save-excursion
+      (goto-char start)
+      (while (re-search-forward git--commit-filename-line-regexp nil t)
+        (let ((beg (match-beginning 2))
+              (end (match-end 2)))
+          (let ((ov (make-overlay beg end)))
+            (overlay-put ov 'git-filename (buffer-substring beg end))
+            (overlay-put ov 'git-selected-file t)
+            (overlay-put ov 'face 'git--filename-face))))
       (goto-char start)
       (when (re-search-forward "^#[ \t]*(use \"git add <file>...\"" nil t)
         (forward-line 1)
@@ -1288,8 +1302,8 @@ commit, like git commit --amend will do once we commit."
   "Records the window settings before preparing log buffer.")
 (make-variable-buffer-local 'git--commit-window-settings)
 
-;;TODO
 (defun git--commit-add-file ()
+  "Add a file in the commit buffer."
   (interactive)
   (let ((msg (git--commit-buffer-message)))
     (git-add-new)
@@ -1298,7 +1312,9 @@ commit, like git commit --amend will do once we commit."
 (defun git--commit-redraw-buffer (&optional msg)
   (let ((msg (or msg (ignore-errors (git--commit-buffer-message)) "")))
     (git--commit-prepare-buffer)
-    (insert msg)))
+    (insert msg)
+    ;; comment hook
+    (run-hooks 'git-comment-hook)))
 
 (defun git--commit-buffer-header-value (key)
   (let ((regexp (format "^# *%s *: \\(.*\\)" key)))
@@ -1310,6 +1326,12 @@ commit, like git commit --amend will do once we commit."
 (defun git--commit-buffer-replace-value (key new-value)
   (when (git--commit-buffer-header-value key)
     (replace-match new-value nil nil nil 1)))
+
+(defun git--commit-files ()
+  (let ((ovs (git--commit-file-overlays)))
+    (loop for x in ovs
+          if (overlay-get x 'git-selected-file)
+          collect (overlay-get x 'git-filename))))
 
 (defun git--commit-buffer-args ()
   (let* ((author (git--commit-buffer-header-value "Author"))
@@ -1376,9 +1398,18 @@ Trim the buffer log, commit runs any after-commit functions."
   (save-excursion
     (goto-char (point-min))
     (let ((msg (git--commit-buffer-message))
-          (args (git--commit-buffer-args)))
+          (args (git--commit-buffer-args))
+          (files (cons "--" (git--commit-files)))
+          ;;TODO fix..
+          (args2 (let ((args (delete "-a" git--commit-args)))
+                   (loop for arg in args
+                         if (string= arg "--")
+                         return res
+                         else
+                         collect arg into res))))
       ;; TODO sophisticated message
-      (message "%s" (apply #'git--commit msg (append args git--commit-args)))))
+      (message "%s" (apply #'git--commit 
+                           msg (append args args2 files)))))
 
   ;; update state marks, either for the files committed or the whole repo
   (git--update-all-state-marks
@@ -1390,12 +1421,60 @@ Trim the buffer log, commit runs any after-commit functions."
   (let ((local-git--commit-after-hook
          (when (local-variable-p 'git--commit-after-hook)
            (cdr git--commit-after-hook))) ; skip the "t" for local
-        (win-settings git--commit-window-settings)) 
+        (win-settings git--commit-window-settings))
     (kill-buffer git--commit-log-buffer)
     (when (window-configuration-p win-settings)
       (set-window-configuration win-settings))
     ;; hooks (e.g. switch branch)
     (run-hooks 'local-git--commit-after-hook 'git--commit-after-hook)))
+
+;;TODO
+(defun git--toggle-mark-commit ()
+  (interactive)
+  (dolist (ov (overlays-in (line-beginning-position) (line-end-position)))
+    (when (overlay-get ov 'git-filename)
+      (cond
+       ((overlay-get ov 'git-selected-file)
+        (overlay-put ov 'git-selected-file nil)
+        (overlay-put ov 'face 'git--grayout-face))
+       (t
+        (overlay-put ov 'git-selected-file t)
+        (overlay-put ov 'face 'git--filename-face))))))
+
+(defun git--commit-next-file ()
+  (interactive)
+  (git--commit-goto-next-file t))
+
+(defun git--commit-prev-file ()
+  (interactive)
+  (git--commit-goto-next-file nil))
+
+(defun git--commit-goto-next-file (forward-p)
+  (let* ((ovs (sort (git--commit-file-overlays)
+                    (lambda (x y) 
+                      (< (overlay-start x) (overlay-start y)))))
+         (ov
+          (cond
+           ((null ovs) nil)
+           (forward-p
+            (loop for ov in ovs
+                  if (> (overlay-start ov) (point))
+                  return ov
+                  finally return (car ovs)))
+           (t
+            (let ((ovs (nreverse ovs)))
+              (loop for ov in ovs
+                    if (< (overlay-start ov) (point))
+                    return ov
+                    finally return (car ovs)))))))
+    (when ov
+      (goto-char (overlay-start ov)))))
+
+(defun git--commit-file-overlays ()
+  (loop for ov in (overlays-in (point-min) (point-max))
+        if (overlay-get ov 'git-filename)
+        collect ov into res
+        finally return res))
 
 ;;-----------------------------------------------------------------------------
 ;; Merge support.
@@ -1622,7 +1701,7 @@ the user quits or the merge is successfully committed."
 ;;-----------------------------------------------------------------------------
 
 (defconst git--commit-status-font-lock-keywords
-  '(("^#\t\\([^:]+\\): +[^ ]+$"
+  `((,git--commit-filename-line-regexp
      (1 'git--bold-face))
     ("^# \\(Branch\\|Author\\|Email\\|Date\\|Amend\\) +:" (1 'git--bold-face))
     ("^# \\(-----*[^-]+-----*\\).*$" (1 'git--log-line-face))))
@@ -1678,6 +1757,9 @@ button, or at the end of the file if it didn't create any."
 (defun git--commit-prepare-buffer (&optional amend)
   (let ((inhibit-read-only t))
     (erase-buffer)
+    ;; clear previous overlays
+    (remove-overlays)
+
     ;; insert info
     (git--insert-log-header-info amend)
 
@@ -1704,6 +1786,7 @@ button, or at the end of the file if it didn't create any."
                         (unless (eq 0 (apply #'git--commit-dryrun-compat t git--commit-args))
                           (kill-buffer nil)
                           (error "Nothing to commit%s"
+                                 ;;TODO undefined targets
                                  (if (eq t targets) "" ", try git-commit-all"))))
 
       ;; Remove "On branch blah" it's redundant
@@ -1728,6 +1811,9 @@ button, or at the end of the file if it didn't create any."
     (define-key map "\C-c\C-c" 'git--commit-buffer)
     (define-key map "\C-c\C-q" 'git--quit-buffer)
     (define-key map "\C-c\C-k" 'git--quit-buffer)
+    (define-key map "\C-c\C-m" 'git--toggle-mark-commit)
+    (define-key map "\C-i"     'git--commit-next-file)
+    (define-key map "\e\C-i"   'git--commit-prev-file)
 
     (setq git-commit-map map)))
 
@@ -1761,7 +1847,7 @@ Returns the buffer."
             git--commit-targets targets
             git--commit-args (append
                               (when amend '("--amend"))
-                              (cond ((eq nil targets) '())
+                              (cond ((null targets) '())
                                     ((eq t targets) '("-a"))
                                     ((listp targets) (cons "--" targets))
                                     (t (error "Invalid targets: %S" targets))))
@@ -2213,7 +2299,8 @@ buffer instead of a new one."
                    (get-buffer-create diff-buffer-name))))
     (with-current-buffer buffer
       (buffer-disable-undo)
-      (let ((buffer-read-only nil)) (erase-buffer))
+      (let ((buffer-read-only nil))
+        (erase-buffer))
       (setq buffer-read-only t)
       (diff-mode)
       ;; See diff-mode.el, search for "neat trick", for why this is necessary
