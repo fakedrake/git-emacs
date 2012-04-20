@@ -293,8 +293,12 @@ the standard output there. Returns the git return code."
       (while (re-search-forward git--commit-filename-line-regexp nil t)
         (let ((beg (match-beginning 2))
               (end (match-end 2)))
-          (let ((ov (make-overlay beg end)))
-            (overlay-put ov 'git-filename (buffer-substring beg end))
+          (let* ((ov (make-overlay beg end))
+                 (tmp (buffer-substring beg end))
+                 (files (if (string-match "\\(.+\\) -> \\(.+\\)$" tmp)
+                            (list (match-string 1 tmp) (match-string 2 tmp))
+                          (list tmp))))
+            (overlay-put ov 'git-filenames files)
             (overlay-put ov 'git-selected-file t)
             (overlay-put ov 'face 'git--filename-face))))
       (goto-char start)
@@ -1331,7 +1335,7 @@ commit, like git commit --amend will do once we commit."
   (let ((ovs (git--commit-file-overlays)))
     (loop for x in ovs
           if (overlay-get x 'git-selected-file)
-          collect (overlay-get x 'git-filename))))
+          append (overlay-get x 'git-filenames))))
 
 (defun git--commit-buffer-args ()
   (let* ((author (git--commit-buffer-header-value "Author"))
@@ -1432,7 +1436,7 @@ Trim the buffer log, commit runs any after-commit functions."
 (defun git--toggle-mark-commit ()
   (interactive)
   (dolist (ov (overlays-in (line-beginning-position) (line-end-position)))
-    (when (overlay-get ov 'git-filename)
+    (when (overlay-get ov 'git-filenames)
       (cond
        ((overlay-get ov 'git-selected-file)
         (overlay-put ov 'git-selected-file nil)
@@ -1472,7 +1476,7 @@ Trim the buffer log, commit runs any after-commit functions."
 
 (defun git--commit-file-overlays ()
   (loop for ov in (overlays-in (point-min) (point-max))
-        if (overlay-get ov 'git-filename)
+        if (overlay-get ov 'git-filenames)
         collect ov into res
         finally return res))
 
