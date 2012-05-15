@@ -1410,7 +1410,8 @@ Trim the buffer log, commit runs any after-commit functions."
                          if (string= arg "--")
                          return res
                          else
-                         collect arg into res))))
+                         collect arg into res
+                         finally return res))))
       ;; TODO sophisticated message
       (message "%s" (apply #'git--commit 
                            msg (append args args2 files)))))
