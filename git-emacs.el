@@ -1373,9 +1373,9 @@ commit, like git commit --amend will do once we commit."
            (diff-m (funcall getter 9))
            (diff (and diff-h diff-m
                       (* (+ (* diff-h 60 60) (* diff-m 60))
-                         (if (string= "-" sign) 1 -1)))))
+                         (if (string= "-" sign) -1 1)))))
       ;; currently ignore the timezone
-      (encode-time sec min hour day month year))))
+      (encode-time sec min hour day month year diff))))
 
 (defun git--commit-buffer-message ()
   (save-excursion
@@ -1388,10 +1388,10 @@ commit, like git commit --amend will do once we commit."
         (error "Commit buffer is broken"))
       (git--trim-string (buffer-substring begin end)))))
 
-(defun git--commit-buffer ()
+(defun git--commit-buffer (&optional with-all)
   "Called when the user commits, in the commit buffer (C-cC-c).
 Trim the buffer log, commit runs any after-commit functions."
-  (interactive)
+  (interactive "P")
 
   ;; check buffer
   (unless (string= (buffer-name (current-buffer))
@@ -1403,18 +1403,24 @@ Trim the buffer log, commit runs any after-commit functions."
     (goto-char (point-min))
     (let ((msg (git--commit-buffer-message))
           (args (git--commit-buffer-args))
-          (files (cons "--" (git--commit-files)))
-          ;;TODO fix..
-          (args2 (let ((args (delete "-a" git--commit-args)))
-                   (loop for arg in args
-                         if (string= arg "--")
-                         return res
-                         else
-                         collect arg into res
-                         finally return res))))
+          ;; user selected args
+          (user-args
+           (let* ((buf-args (delete "-a" git--commit-args))
+                  (args (if with-all
+                            (cons "-a" buf-args)
+                          buf-args)))
+             (loop for arg in args
+                   if (string= arg "--")
+                   return res
+                   else
+                   collect arg into res
+                   finally return res)))
+          ;; truncate selected files if optional arg
+          (files (unless with-all
+                   (cons "--" (git--commit-files)))))
       ;; TODO sophisticated message
       (message "%s" (apply #'git--commit 
-                           msg (append args args2 files)))))
+                           msg (append args user-args files)))))
 
   ;; update state marks, either for the files committed or the whole repo
   (git--update-all-state-marks

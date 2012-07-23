@@ -208,19 +208,56 @@ See also function `git-blame-mode'."
   (git-blame-cleanup)
   (git-blame-run))
 
+;;TODO FIXME windows not works ordinally function..
+(defun git-blame-run-for-win (&optional startline endline)
+  (let ((display-buf (current-buffer))
+        (blame-buf (get-buffer-create
+                    (concat " *Git blame for " (buffer-file-name))))
+        (args '("git" "blame" "--incremental" "--contents"))
+        (dir (file-name-directory buffer-file-name))
+        (fullname buffer-file-name)
+        (fn (file-name-nondirectory buffer-file-name)))
+    (if startline
+        (setq args (append args
+                           (list "-L" (format "%d,%d" startline endline)))))
+    (setq args (append args (list "-")))
+    (setq git-blame-proc
+          (let ((default-directory dir))
+            (apply 'start-process
+                   "git-blame" blame-buf
+                   (or explicit-shell-file-name shell-file-name)
+                   shell-command-switch
+                   (format "%s \"%s\" < \"%s\"" 
+                           (mapconcat 'identity args " ")
+                           fn fullname)
+                   args)))
+    (with-current-buffer blame-buf
+      (erase-buffer)
+      (make-local-variable 'git-blame-file)
+      (make-local-variable 'git-blame-current)
+      (setq git-blame-file display-buf)
+      (setq git-blame-current nil))
+    (set-process-filter git-blame-proc 'git-blame-filter)
+    (set-process-sentinel git-blame-proc 'git-blame-sentinel)))
+
 (defun git-blame-run (&optional startline endline)
-  (if git-blame-proc
-      ;; Should maybe queue up a new run here
-      (message "Already running git blame")
+  (cond 
+   (git-blame-proc
+    ;; Should maybe queue up a new run here
+    (message "Already running git blame"))
+   ((memq system-type '(windows-nt))
+    ;;TODO
+    (git-blame-run-for-win startline endline))
+   (t
     (let ((display-buf (current-buffer))
           (blame-buf (get-buffer-create
                       (concat " *Git blame for " (buffer-file-name))))
-          (args '("--incremental" "--contents" "-")))
+          (args '("--incremental" "--contents")))
       (if startline
           (setq args (append args
                              (list "-L" (format "%d,%d" startline endline)))))
       (setq args (append args
-                         (list (file-name-nondirectory buffer-file-name))))
+                         (list "-" (file-name-nondirectory buffer-file-name))))
       (setq git-blame-proc
             (apply 'start-process
                    "git-blame" blame-buf
@@ -235,7 +272,7 @@ See also function `git-blame-mode'."
       (set-process-filter git-blame-proc 'git-blame-filter)
       (set-process-sentinel git-blame-proc 'git-blame-sentinel)
       (process-send-region git-blame-proc (point-min) (point-max))
-      (process-send-eof git-blame-proc))))
+      (process-send-eof git-blame-proc)))))
 
 (defun git-blame-remove-text-properties (start end)
   (let ((modified (buffer-modified-p))
@@ -305,6 +342,7 @@ See also function `git-blame-mode'."
                     hash src-line res-line num-lines))))
          (delete-region (point) (match-end 0))
          t)
+        ;;TODO no need cond
         ((looking-at "filename \\(.+\\)\n")
          (let ((filename (match-string 1)))
            (git-blame-add-info "filename" filename))
