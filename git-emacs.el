@@ -50,7 +50,7 @@
 ;; First, make sure that vc-git.el is in your load path. Emacs 23 ships it by
 ;; default, for older versions you can get it from git distributions prior
 ;; to 1.6.x.
-;; 
+;;
 ;; 1) Load at startup (simplest)
 ;;
 ;; (add-to-list 'load-path "~/.emacs.d/git-emacs")  ; or your installation path
@@ -117,6 +117,12 @@
 (defgroup git-emacs nil
   "A user interface for the git versioning system."
   :group 'tools)
+
+(defcustom git--commit-filename-buttonize-regex "^#\t[^:]+: +\\(.*\\)"
+  "The matches of group 1 of the regular expression are
+transformed into buttons in the commit buffer."
+  :type '(string)
+  :group 'git-emacs)
 
 (defcustom git--use-ido t
   "Whether to use ido completion for git-emacs prompts."
@@ -978,9 +984,9 @@ except EXCEPTS. Returns the user's selection."
   "Interactive git pull. Prompts user for a remote branch, and pulls from it.
   This command will fail if we can not do a ff-only pull from the remote branch."
   (interactive)
-  (let ((remote (git--select-remote 
-                 (concat "Select remote for pull (local branch:" 
-                         (git--current-branch) 
+  (let ((remote (git--select-remote
+                 (concat "Select remote for pull (local branch:"
+                         (git--current-branch)
                          "): "))))
     (message (git--pull-ff-only remote))))
 
@@ -999,19 +1005,19 @@ except EXCEPTS. Returns the user's selection."
                                 (let ((lines (split-string resultstring "\n")))
                                   (if (string-equal (nth 2 lines) "Already up-to-date.")
                                       "Already up-to-date."
-                                    (let ((revision-change 
-                                           (split-string (cadr (split-string (nth 2 lines) )) 
+                                    (let ((revision-change
+                                           (split-string (cadr (split-string (nth 2 lines) ))
                                                          "\\.\\.")))
-                                      (concat "Pulled revisions from " 
-                                              (car revision-change) 
-                                              " to " 
-                                              (cadr revision-change) 
+                                      (concat "Pulled revisions from "
+                                              (car revision-change)
+                                              " to "
+                                              (cadr revision-change)
                                               "." (nth (- (length lines) 2) lines))))))))
     (let ((remote-name (car split-remote))
           (remote-branch (car (cdr split-remote))))
       (condition-case err
           (progn
-            (funcall parse-success-string 
+            (funcall parse-success-string
                      (git--exec-string "pull" "--ff-only" remote-name (concat remote-branch))))
         (error (error-message-string err))))))
 
@@ -1023,30 +1029,30 @@ except EXCEPTS. Returns the user's selection."
   (nth j (nth i arr)))
 
 (defun git--actual-push (remote-name remote-branch)
-  (let ((actual-run-output 
-         (git--split-porcelain 
-          (git--exec-string "push" "--porcelain" 
-                            remote-name 
+  (let ((actual-run-output
+         (git--split-porcelain
+          (git--exec-string "push" "--porcelain"
+                            remote-name
                             (concat (git--current-branch) ":" remote-branch)))))
-    (message (concat "Pushed changes " 
-                     (git--n-n-th 1 2 dry-run-output) 
-                     " to remote " 
-                     remote-name 
-                     "/" 
+    (message (concat "Pushed changes "
+                     (git--n-n-th 1 2 dry-run-output)
+                     " to remote "
+                     remote-name
+                     "/"
                      remote-branch))))
 
 (defun git--push-ff-only (remote)
   "Pushes from current branch into remote, fast-forward only."
   (let ((split-remote (split-string remote "/")))
-    (let ((dry-run-output (git--split-porcelain 
-                           (git--exec-string "push" "--dry-run" "--porcelain" 
-                                             (car split-remote) 
+    (let ((dry-run-output (git--split-porcelain
+                           (git--exec-string "push" "--dry-run" "--porcelain"
+                                             (car split-remote)
                                              (concat (git--current-branch) ":" (cadr split-remote))))))
       (let ((newbranch (string-equal (git--n-n-th 1 2 dry-run-output) "[new branch]"))
             (change-diff (git--n-n-th 1 2 dry-run-output))
             (up-to-date (string-equal (git--n-n-th 1 0 dry-run-output) "Everything up-to-date")))
-        (cond (newbranch (if (y-or-n-p (concat "Pushing will create branch " 
-                                               (cadr split-remote) 
+        (cond (newbranch (if (y-or-n-p (concat "Pushing will create branch "
+                                               (cadr split-remote)
                                                " in remote. Continue? "))
                              (git--actual-push (car split-remote) (cadr split-remote))
                            (message "Did not push.")))
@@ -1497,7 +1503,7 @@ when it would move forward more than one line after a filename. The buttons
 created are of the given TYPE. Leaves the cursor at the end of the last
 button, or at the end of the file if it didn't create any."
   (let (last-match-pos)
-    (while (and (re-search-forward "^#\t[^:]+: +\\(.*\\)" nil t)
+    (while (and (re-search-forward git--commit-filename-buttonize-regex nil t)
                 (or (not single-block)
                     (not last-match-pos)
                     (<= (count-lines last-match-pos (point)) 2)))
@@ -1683,7 +1689,7 @@ a prefix argument, is specified, does a commit --amend."
 (defun git-clone (dir)
   "Clone a repository (prompts for the URL) into the local directory DIR (
 prompts if unspecified)."
-  
+
   (interactive "DLocal destination directory: ")
 
   (let ((repository
@@ -1871,7 +1877,7 @@ the result as a message."
                                        (git--config-get-author)))
 
       (git--config "--global" "user.name" name))
-    
+
     (when (or (null email) (string= "" email))
       (setq email (read-from-minibuffer "User Email : "
                                         (git--config-get-email)))
@@ -1887,7 +1893,7 @@ the result as a message."
     (insert file-or-glob "\n")
     (append-to-file (point-min) (point-max)
                     (expand-file-name ".gitignore" (git--get-top-dir)))))
-  
+
 (defun git-switch-branch (&optional branch)
   "Git switch branch, selecting from a list of branches."
   (interactive)
@@ -1927,7 +1933,7 @@ for new files to add to git."
              (let ((current-file (file-relative-name buffer-file-name)))
                (when (member current-file choices)
                  (message "default: %S" current-file) current-file))))
-         (files (git--select-from-user "Add new files (glob) >> " 
+         (files (git--select-from-user "Add new files (glob) >> "
                                        choices nil default-choice))
          (matched-files (mapcar #'(lambda (fi) (git--fileinfo->name fi))
                                 (git--ls-files "--others" "--exclude-standard"
@@ -2614,7 +2620,7 @@ usual pre / post work: ask for save, ask for refresh."
    3 secs
    (lambda (p)
      ;; iterating visible buffers
-     (let ((visible-buffers 
+     (let ((visible-buffers
             (mapcar #'(lambda (window) (window-buffer window)) (window-list))))
        (loop for buffer in visible-buffers do
              (with-current-buffer buffer
