@@ -208,19 +208,56 @@ See also function `git-blame-mode'."
   (git-blame-cleanup)
   (git-blame-run))
 
+;;TODO FIXME windows not works ordinally function..
+(defun git-blame-run-for-win (&optional startline endline)
+  (let ((display-buf (current-buffer))
+        (blame-buf (get-buffer-create
+                    (concat " *Git blame for " (buffer-file-name))))
+        (args '("git" "blame" "--incremental" "--contents"))
+        (dir (file-name-directory buffer-file-name))
+        (fullname buffer-file-name)
+        (fn (file-name-nondirectory buffer-file-name)))
+    (if startline
+        (setq args (append args
+                           (list "-L" (format "%d,%d" startline endline)))))
+    (setq args (append args (list "-")))
+    (setq git-blame-proc
+          (let ((default-directory dir))
+            (apply 'start-process
+                   "git-blame" blame-buf
+                   (or explicit-shell-file-name shell-file-name)
+                   shell-command-switch
+                   (format "%s \"%s\" < \"%s\"" 
+                           (mapconcat 'identity args " ")
+                           fn fullname)
+                   args)))
+    (with-current-buffer blame-buf
+      (erase-buffer)
+      (make-local-variable 'git-blame-file)
+      (make-local-variable 'git-blame-current)
+      (setq git-blame-file display-buf)
+      (setq git-blame-current nil))
+    (set-process-filter git-blame-proc 'git-blame-filter)
+    (set-process-sentinel git-blame-proc 'git-blame-sentinel)))
+
 (defun git-blame-run (&optional startline endline)
-  (if git-blame-proc
-      ;; Should maybe queue up a new run here
-      (message "Already running git blame")
+  (cond 
+   (git-blame-proc
+    ;; Should maybe queue up a new run here
+    (message "Already running git blame"))
+   ((memq system-type '(windows-nt))
+    ;;TODO
+    (git-blame-run-for-win startline endline))
+   (t
     (let ((display-buf (current-buffer))
           (blame-buf (get-buffer-create
-                      (concat " git blame for " (buffer-name))))
-          (args '("--incremental" "--contents" "-")))
+                      (concat " *Git blame for " (buffer-file-name))))
+          (args '("--incremental" "--contents")))
       (if startline
           (setq args (append args
                              (list "-L" (format "%d,%d" startline endline)))))
       (setq args (append args
-                         (list (file-name-nondirectory buffer-file-name))))
+                         (list "-" (file-name-nondirectory buffer-file-name))))
       (setq git-blame-proc
             (apply 'start-process
                    "git-blame" blame-buf
@@ -235,9 +272,9 @@ See also function `git-blame-mode'."
       (set-process-filter git-blame-proc 'git-blame-filter)
       (set-process-sentinel git-blame-proc 'git-blame-sentinel)
       (process-send-region git-blame-proc (point-min) (point-max))
-      (process-send-eof git-blame-proc))))
+      (process-send-eof git-blame-proc)))))
 
-(defun remove-git-blame-text-properties (start end)
+(defun git-blame-remove-text-properties (start end)
   (let ((modified (buffer-modified-p))
         (inhibit-read-only t))
     (remove-text-properties start end '(point-entered nil))
@@ -247,7 +284,7 @@ See also function `git-blame-mode'."
   "Remove all blame properties"
     (mapc 'delete-overlay git-blame-overlays)
     (setq git-blame-overlays nil)
-    (remove-git-blame-text-properties (point-min) (point-max)))
+    (git-blame-remove-text-properties (point-min) (point-max)))
 
 (defun git-blame-update-region (start end)
   "Rerun blame to get updates between START and END"
@@ -260,34 +297,37 @@ See also function `git-blame-mode'."
             (setq end (overlay-end overlay)))
         (setq git-blame-overlays (delete overlay git-blame-overlays))
         (delete-overlay overlay))))
-  (remove-git-blame-text-properties start end)
+  (git-blame-remove-text-properties start end)
   ;; We can be sure that start and end are at line breaks
   (git-blame-run (1+ (count-lines (point-min) start))
                  (count-lines (point-min) end)))
 
 (defun git-blame-sentinel (proc status)
-  (with-current-buffer (process-buffer proc)
-    (with-current-buffer git-blame-file
-      (setq git-blame-proc nil)
-      (if git-blame-update-queue
-          (git-blame-delayed-update))))
-  ;;(kill-buffer (process-buffer proc))
-  ;;(message "git blame finished")
-  )
+  (when (memq (process-status proc) '(exit signal))
+    (with-current-buffer (process-buffer proc)
+      (when (buffer-live-p git-blame-file)
+        (with-current-buffer git-blame-file
+          (setq git-blame-proc nil)
+          (if git-blame-update-queue
+              (git-blame-delayed-update)))))
+    (kill-buffer (process-buffer proc))
+    (if (= (process-exit-status proc) 0)
+        (message "git blame finished")
+      (message "git blame abnormaly finished"))))
 
-(defvar in-blame-filter nil)
+(defvar git-blame-in-filter nil)
 
 (defun git-blame-filter (proc str)
-  (save-excursion
-    (set-buffer (process-buffer proc))
-    (goto-char (process-mark proc))
-    (insert-before-markers str)
-    (goto-char 0)
-    (unless in-blame-filter
-      (let ((more t)
-            (in-blame-filter t))
-        (while more
-          (setq more (git-blame-parse)))))))
+  (with-current-buffer (process-buffer proc)
+    (save-excursion
+      (goto-char (process-mark proc))
+      (insert-before-markers str)
+      (goto-char (point-min))
+      (unless git-blame-in-filter
+        (let ((more t)
+              (git-blame-in-filter t))
+          (while more
+            (setq more (git-blame-parse))))))))
 
 (defun git-blame-parse ()
   (cond ((looking-at "\\([0-9a-f]\\{40\\}\\) \\([0-9]+\\) \\([0-9]+\\) \\([0-9]+\\)\n")
@@ -302,6 +342,7 @@ See also function `git-blame-mode'."
                     hash src-line res-line num-lines))))
          (delete-region (point) (match-end 0))
          t)
+        ;;TODO no need cond
         ((looking-at "filename \\(.+\\)\n")
          (let ((filename (match-string 1)))
            (git-blame-add-info "filename" filename))
@@ -320,43 +361,51 @@ See also function `git-blame-mode'."
         (t
          nil)))
 
+(defun git--blame-goto-line (line)
+  (goto-char (point-min))
+  (forward-line (1- line)))
+
 (defun git-blame-new-commit (hash src-line res-line num-lines)
-  (save-excursion
-    (set-buffer git-blame-file)
-    (let ((info (gethash hash git-blame-cache))
-          (inhibit-point-motion-hooks t)
-          (inhibit-modification-hooks t))
-      (when (not info)
-	;; Assign a random color to each new commit info
-	;; Take care not to select the same color multiple times
-	(let ((color (if git-blame-colors
-			 (git-blame-random-pop git-blame-colors)
-		       git-blame-ancient-color)))
-          (setq info (list hash src-line res-line num-lines
-                           (git-describe-commit hash)
-                           (cons 'color color))))
-        (puthash hash info git-blame-cache))
-      (goto-line res-line)
-      (while (> num-lines 0)
-        (if (get-text-property (point) 'git-blame)
-            (forward-line)
-          (let* ((start (point))
-                 (end (progn (forward-line 1) (point)))
-                 (ovl (make-overlay start end)))
-            (push ovl git-blame-overlays)
-            (overlay-put ovl 'git-blame info)
-            (overlay-put ovl 'help-echo hash)
-            (overlay-put ovl 'face (list :background
-                                         (cdr (assq 'color (nthcdr 5 info)))))
-            ;; the point-entered property doesn't seem to work in overlays
-            ;;(overlay-put ovl 'point-entered
-            ;;             `(lambda (x y) (git-blame-identify ,hash)))
-            (let ((modified (buffer-modified-p)))
-              (put-text-property (if (= start 1) start (1- start)) (1- end)
-                                 'point-entered
-                                 `(lambda (x y) (git-blame-identify ,hash)))
-              (set-buffer-modified-p modified))))
-        (setq num-lines (1- num-lines))))))
+  (when (buffer-live-p git-blame-file)
+    (with-current-buffer git-blame-file
+      (save-excursion
+        (save-restriction
+          (widen)
+          (let ((buffer-read-only)
+                (info (gethash hash git-blame-cache))
+                (inhibit-point-motion-hooks t)
+                (inhibit-modification-hooks t))
+            (when (not info)
+              ;; Assign a random color to each new commit info
+              ;; Take care not to select the same color multiple times
+              (let ((color (if git-blame-colors
+                               (git-blame-random-pop git-blame-colors)
+                             git-blame-ancient-color)))
+                (setq info (list hash src-line res-line num-lines
+                                 (git-describe-commit hash)
+                                 (cons 'color color))))
+              (puthash hash info git-blame-cache))
+            (git--blame-goto-line res-line)
+            (while (> num-lines 0)
+              (if (get-text-property (point) 'git-blame)
+                  (forward-line)
+                (let* ((start (point))
+                       (end (progn (forward-line 1) (point)))
+                       (ovl (make-overlay start end)))
+                  (push ovl git-blame-overlays)
+                  (overlay-put ovl 'git-blame info)
+                  (overlay-put ovl 'help-echo hash)
+                  (overlay-put ovl 'face (list :background
+                                               (cdr (assq 'color (nthcdr 5 info)))))
+                  ;; the point-entered property doesn't seem to work in overlays
+                  ;;(overlay-put ovl 'point-entered
+                  ;;             `(lambda (x y) (git-blame-identify ,hash)))
+                  (let ((modified (buffer-modified-p)))
+                    (put-text-property (if (= start 1) start (1- start)) (1- end)
+                                       'point-entered
+                                       `(lambda (x y) (git-blame-identify ,hash)))
+                    (set-buffer-modified-p modified))))
+              (setq num-lines (1- num-lines)))))))))
 
 (defun git-blame-add-info (key value)
   (if git-blame-current
@@ -371,16 +420,16 @@ See also function `git-blame-mode'."
 (defun git-describe-commit (hash)
   (with-temp-buffer
     (call-process "git" nil t nil
-                  "log" "-1" "--pretty=format:\"%H %an -- %s\""
+                  "log" "-1" "--pretty=format:%h %an -- %s"
                   hash)
     (buffer-substring (point-min) (1- (point-max)))))
 
 (defvar git-blame-last-identification nil)
 (make-variable-buffer-local 'git-blame-last-identification)
 (defun git-blame-identify (&optional hash)
-  (interactive)
-  (let ((info (gethash (or hash (git-blame-current-commit)) git-blame-cache)))
-    (when (and info (not (eq info git-blame-last-identification)))
+  (let ((message-log-max)               ; suppress too many *Message*
+        (info (gethash (or hash (git-blame-current-commit)) git-blame-cache)))
+    (when info
       (message "%s" (nth 4 info))
       (setq git-blame-last-identification info))))
 
